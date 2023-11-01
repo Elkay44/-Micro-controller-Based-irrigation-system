@@ -1,0 +1,98 @@
+#define BLYNK_PRINT Serial
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+#include <SimpleTimer.h>
+#include <DHT.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+char auth[] = "";       // Authentication code sent by Blynk
+char ssid[] = "";       // WiFi SSID
+char pass[] = "";       // WiFi Password
+
+#define sensorPin D4
+#define Soilsensor A1
+#define RELAY_ENABLE D5
+#define DHTPIN 2
+#define DHTTYPE DHT11
+
+SimpleTimer timer;
+DHT dht(DHTPIN, DHTTYPE);
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
+
+int sensorState = 0;
+int lastState = 0;
+int sensorValue = analogRead(Soilsensor);
+int limit = 300;
+
+void sendSensor()
+{
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+
+  if (isnan(h) || isnan(t)) {
+    Serial.println("Failed to read from DHT sensor!");
+    return;
+  }
+
+  Blynk.virtualWrite(V5, h);  // V5 is for Humidity
+  Blynk.virtualWrite(V6, t);  // V6 is for Temperature
+  Blynk.virtualWrite(V7, sensorValue);  // V7 is for soil Sensor
+}
+
+void setup()
+{
+  Blynk.begin(auth, ssid, pass);
+  pinMode(sensorPin, INPUT);
+  pinMode(Soilsensor, INPUT);
+  pinMode(RELAY_ENABLE, OUTPUT);
+  Serial.begin(9600);
+  dht.begin();
+
+  timer.setInterval(1000L, sendSensor);
+  sensors.begin();
+}
+
+int sensor = 0;
+
+void sendTemps()
+{
+  sensor = analogRead(A0);
+  sensors.requestTemperatures();
+  float temp = sensors.getTempCByIndex(0);
+  Serial.println(temp);
+  Serial.println(sensor);
+  Blynk.virtualWrite(V1, temp);
+  Blynk.virtualWrite(V2, sensor);
+  delay(1000);
+}
+
+void loop()
+{
+  Blynk.run();
+  timer.run();
+  sendTemps();
+  sensorState = digitalRead(sensorPin);
+  Serial.println(sensorState);
+
+  if (sensorState == 1 && lastState == 0 && limit < 300) {
+    Serial.println("Needs water, send notification");
+    Blynk.notify("Water your plants");
+    lastState = 1;
+    digitalWrite(RELAY_ENABLE, LOW); // Switch on the valve
+    delay(1000);
+  } 
+  else if (sensorState == 1 && lastState == 1) {
+    // The valve is not open
+    Serial.println("Has not been watered yet"); // The Valve is faulty
+    delay(1000);
+  }
+  else {
+    digitalWrite(RELAY_ENABLE, HIGH);  // Switch off the valve
+    Serial.println("Valve Closed");
+    lastState = 0;
+    delay(1000);
+  }
+  delay(100);
+}
